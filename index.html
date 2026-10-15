@@ -43,31 +43,36 @@
 (function () {
   var URL_EXEC = 'https://script.google.com/macros/s/AKfycbxyLKFIC5usHen0-c3glTYn7-fQgyeiOfhhGQnftCIg_m7GtNTSarngH-ggXectcvspuA/exec';
   var TEXTO = 'CARREGANDO ORÁCULO...';
-  var TEMPO_LIMITE_MS = 30000;
+  var TEXTO_DEMORA = 'DESPERTANDO O ORÁCULO...';
+  // O Apps Script parado há um tempo pode levar mais de 30 s na primeira chamada,
+  // ou falhar; por isso a espera longa e as novas tentativas automáticas.
+  var TEMPO_LIMITE_MS = 90000;
+  var TENTATIVAS = 3;
   var ERRO = '<!--serpentina:erro-->';
 
+  var caixa = document.getElementById('serpentina');
   var msg = document.getElementById('serpentina-msg');
   var botao = document.getElementById('serpentina-botao');
 
   function falhou() {
-    document.getElementById('serpentina').className = 'falhou';
+    caixa.className = 'falhou';
     msg.textContent = 'NÃO FOI POSSÍVEL CARREGAR.';
     botao.hidden = false;
   }
 
-  function carregar() {
-    document.getElementById('serpentina').className = '';
-    msg.textContent = TEXTO;
-    botao.hidden = true;
+  function tentar(n) {
     var ctrl = new AbortController();
     var timer = setTimeout(function () { ctrl.abort(); }, TEMPO_LIMITE_MS);
-    fetch(URL_EXEC + (URL_EXEC.indexOf('?') < 0 ? '?' : '&') + 'texto=1', { signal: ctrl.signal, cache: 'no-store' })
+    var aviso = setTimeout(function () { msg.textContent = TEXTO_DEMORA; }, 8000);
+    var url = URL_EXEC + (URL_EXEC.indexOf('?') < 0 ? '?' : '&') + 'texto=1&t=' + Date.now();
+    fetch(url, { signal: ctrl.signal, cache: 'no-store' })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.text();
       })
       .then(function (html) {
         clearTimeout(timer);
+        clearTimeout(aviso);
         if (html.indexOf(ERRO) === 0) throw new Error('erro no Apps Script');
         // Substitui este documento (e a tela de carregamento) pelo site.
         document.open();
@@ -76,9 +81,22 @@
       })
       .catch(function (err) {
         clearTimeout(timer);
-        console.error('serpentina:', err);
-        falhou();
+        clearTimeout(aviso);
+        console.error('serpentina (tentativa ' + n + '):', err);
+        if (n < TENTATIVAS) {
+          msg.textContent = TEXTO_DEMORA;
+          setTimeout(function () { tentar(n + 1); }, 2000);
+        } else {
+          falhou();
+        }
       });
+  }
+
+  function carregar() {
+    caixa.className = '';
+    msg.textContent = TEXTO;
+    botao.hidden = true;
+    tentar(1);
   }
 
   botao.onclick = carregar;
