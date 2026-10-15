@@ -1,8 +1,10 @@
 <!doctype html>
 <!-- Serpentina: página carregadora servida no subdomínio (GitHub Pages).
-     Busca o HTML pela API do Drive (ou, na falta dela, no App da Web
-     serpentina.gs) e o escreve como a própria página: sem quadro, sem Google
-     Sites. Configuração no início do <script>. -->
+     Instala o sw.js, que passa a servir o site direto da pasta do Drive, e
+     recarrega. Só aparece na primeira visita: depois, quem responde é o sw.js.
+     Sem Service Worker (navegador antigo, janela privada do Firefox), busca o
+     HTML monolítico pela API do Drive ou pelo App da Web serpentina.gs e o
+     escreve como a própria página. O 404.html é cópia deste arquivo. -->
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -41,7 +43,7 @@
 
 <script>
 (function () {
-  // Fonte principal: a API do Drive, servida pela rede do Google, rápida e sem
+  // Reserva sem Service Worker: o HTML monolítico. Fonte principal: a API do Drive, servida pela rede do Google, rápida e sem
   // Apps Script. Exige o arquivo como "Qualquer pessoa com o link: Leitor" e uma
   // chave de API restrita à Drive API e aos referenciadores deste site. Com
   // API_KEY vazia, pula direto para a reserva.
@@ -68,6 +70,11 @@
   var msg = document.getElementById('serpentina-msg');
   var botao = document.getElementById('serpentina-botao');
 
+  function mostrar(feito, total) {
+    msg.textContent = TEXTO.replace(/\.*$/, '') + ' ' +
+      Math.min(99, Math.floor(feito * 100 / total)) + '%';
+  }
+
   function falhou() {
     caixa.className = 'falhou';
     msg.textContent = 'NÃO FOI POSSÍVEL CARREGAR.';
@@ -82,7 +89,20 @@
     fetch(url, { signal: ctrl.signal, cache: 'no-store' })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.text();
+        var total = Number(r.headers.get('Content-Length'));
+        if (!total || !r.body) return r.text();
+        clearTimeout(aviso);
+        var leitor = r.body.getReader(), partes = [], feito = 0;
+        function ler() {
+          return leitor.read().then(function (p) {
+            if (p.done) return new Blob(partes).text();
+            partes.push(p.value);
+            feito += p.value.length;
+            mostrar(feito, total);
+            return ler();
+          });
+        }
+        return ler();
       })
       .then(function (html) {
         clearTimeout(timer);
@@ -113,8 +133,44 @@
     tentar(0);
   }
 
+  // Instala o sw.js e recarrega para ele servir a página. O contador evita um
+  // laço de recargas se algo der errado: na terceira, usa a reserva.
+  function instalar() {
+    var n = 0;
+    try { n = Number(sessionStorage.getItem('serpentina:recargas')) || 0; } catch (e) {}
+    if (n >= 3) {
+      try { sessionStorage.removeItem('serpentina:recargas'); } catch (e) {}
+      return carregar();
+    }
+    var feito = false;
+    function recarregar() {
+      if (feito) return;
+      feito = true;
+      try { sessionStorage.setItem('serpentina:recargas', String(n + 1)); } catch (e) {}
+      location.reload();
+    }
+    navigator.serviceWorker.register('/sw.js')
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function (reg) {
+        // Baixa tudo para o cache mostrando a %; depois recarrega, e o sw.js serve.
+        navigator.serviceWorker.addEventListener('message', function (e) {
+          var m = e.data;
+          if (!m || !m.serpentina) return;
+          if (m.tipo === 'progresso') mostrar(m.feito, m.total);
+          else if (m.tipo === 'pronto') recarregar();
+          else if (m.tipo === 'erro') carregar();
+        });
+        reg.active.postMessage({ tipo: 'preparar' });
+      })
+      .catch(function (err) {
+        console.error('serpentina: sw.js', err);
+        carregar();
+      });
+  }
+
   botao.onclick = carregar;
-  carregar();
+  if ('serviceWorker' in navigator) instalar();
+  else carregar();
 })();
 </script>
 </body>

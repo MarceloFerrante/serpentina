@@ -1,0 +1,177 @@
+<!doctype html>
+<!-- Serpentina: página carregadora servida no subdomínio (GitHub Pages).
+     Instala o sw.js, que passa a servir o site direto da pasta do Drive, e
+     recarrega. Só aparece na primeira visita: depois, quem responde é o sw.js.
+     Sem Service Worker (navegador antigo, janela privada do Firefox), busca o
+     HTML monolítico pela API do Drive ou pelo App da Web serpentina.gs e o
+     escreve como a própria página. O 404.html é cópia deste arquivo. -->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oráculo</title>
+<meta name="theme-color" content="#080806">
+<style>
+  @keyframes serpentina-giro { 100% { transform: rotate(360deg); } }
+  html, body { margin: 0; padding: 0; background: #080806; }
+  #serpentina {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: #080806; color: #c4a76a; font-family: monospace;
+  }
+  #serpentina .anel {
+    width: 46px; height: 46px; border-radius: 50%;
+    border: 1.5px dashed rgba(196, 167, 106, 0.4); border-top: 2px solid #c4a76a;
+    animation: serpentina-giro 1.8s linear infinite;
+  }
+  #serpentina p { margin-top: 18px; font-size: 11px; letter-spacing: 3px; opacity: 0.85; text-align: center; }
+  #serpentina button {
+    margin-top: 12px; padding: 8px 16px; cursor: pointer;
+    background: none; color: inherit; font: inherit; font-size: 11px; letter-spacing: 2px;
+    border: 1px solid rgba(196, 167, 106, 0.6); border-radius: 2px;
+  }
+  #serpentina button[hidden] { display: none; }
+  #serpentina.falhou .anel { animation: none; border-style: solid; opacity: 0.4; }
+</style>
+</head>
+<body>
+<div id="serpentina">
+  <div class="anel"></div>
+  <p id="serpentina-msg">CARREGANDO ORÁCULO...</p>
+  <button id="serpentina-botao" hidden>TENTAR DE NOVO</button>
+</div>
+
+<script>
+(function () {
+  // Reserva sem Service Worker: o HTML monolítico. Fonte principal: a API do Drive, servida pela rede do Google, rápida e sem
+  // Apps Script. Exige o arquivo como "Qualquer pessoa com o link: Leitor" e uma
+  // chave de API restrita à Drive API e aos referenciadores deste site. Com
+  // API_KEY vazia, pula direto para a reserva.
+  var DRIVE_ID = '1-9_AQbL3EPz8sbTP89MhYnlc3rsTDGtj';
+  var API_KEY = 'AIzaSyCBRKDIAk6BwPZmxECFh8tf42pSOnD3Pow';
+  // Reserva: o App da Web serpentina.gs (?texto=1), que acha o arquivo pelo nome.
+  var URL_EXEC = 'https://script.google.com/macros/s/AKfycbxyLKFIC5usHen0-c3glTYn7-fQgyeiOfhhGQnftCIg_m7GtNTSarngH-ggXectcvspuA/exec';
+
+  var TEXTO = 'CARREGANDO ORÁCULO...';
+  var TEXTO_DEMORA = 'DESPERTANDO O ORÁCULO...';
+  var ERRO = '<!--serpentina:erro-->';
+
+  // [url, tempo limite]. O Apps Script parado há um tempo pode levar mais de
+  // 30 s na primeira chamada, ou falhar; por isso a espera longa e as repetições.
+  var exec = URL_EXEC + (URL_EXEC.indexOf('?') < 0 ? '?' : '&') + 'texto=1';
+  var FONTES = [];
+  if (API_KEY) {
+    FONTES.push(['https://www.googleapis.com/drive/v3/files/' + DRIVE_ID +
+      '?alt=media&key=' + API_KEY, 30000]);
+  }
+  FONTES.push([exec, 90000], [exec, 90000], [exec, 90000]);
+
+  var caixa = document.getElementById('serpentina');
+  var msg = document.getElementById('serpentina-msg');
+  var botao = document.getElementById('serpentina-botao');
+
+  function mostrar(feito, total) {
+    msg.textContent = TEXTO.replace(/\.*$/, '') + ' ' +
+      Math.min(99, Math.floor(feito * 100 / total)) + '%';
+  }
+
+  function falhou() {
+    caixa.className = 'falhou';
+    msg.textContent = 'NÃO FOI POSSÍVEL CARREGAR.';
+    botao.hidden = false;
+  }
+
+  function tentar(i) {
+    var url = FONTES[i][0];
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, FONTES[i][1]);
+    var aviso = setTimeout(function () { msg.textContent = TEXTO_DEMORA; }, 8000);
+    fetch(url, { signal: ctrl.signal, cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var total = Number(r.headers.get('Content-Length'));
+        if (!total || !r.body) return r.text();
+        clearTimeout(aviso);
+        var leitor = r.body.getReader(), partes = [], feito = 0;
+        function ler() {
+          return leitor.read().then(function (p) {
+            if (p.done) return new Blob(partes).text();
+            partes.push(p.value);
+            feito += p.value.length;
+            mostrar(feito, total);
+            return ler();
+          });
+        }
+        return ler();
+      })
+      .then(function (html) {
+        clearTimeout(timer);
+        clearTimeout(aviso);
+        if (html.indexOf(ERRO) === 0) throw new Error('erro no Apps Script');
+        // Substitui este documento (e a tela de carregamento) pelo site.
+        document.open();
+        document.write(html);
+        document.close();
+      })
+      .catch(function (err) {
+        clearTimeout(timer);
+        clearTimeout(aviso);
+        console.error('serpentina (fonte ' + (i + 1) + '/' + FONTES.length + '):', err);
+        if (i + 1 < FONTES.length) {
+          msg.textContent = TEXTO_DEMORA;
+          setTimeout(function () { tentar(i + 1); }, i === 0 && API_KEY ? 0 : 2000);
+        } else {
+          falhou();
+        }
+      });
+  }
+
+  function carregar() {
+    caixa.className = '';
+    msg.textContent = TEXTO;
+    botao.hidden = true;
+    tentar(0);
+  }
+
+  // Instala o sw.js e recarrega para ele servir a página. O contador evita um
+  // laço de recargas se algo der errado: na terceira, usa a reserva.
+  function instalar() {
+    var n = 0;
+    try { n = Number(sessionStorage.getItem('serpentina:recargas')) || 0; } catch (e) {}
+    if (n >= 3) {
+      try { sessionStorage.removeItem('serpentina:recargas'); } catch (e) {}
+      return carregar();
+    }
+    var feito = false;
+    function recarregar() {
+      if (feito) return;
+      feito = true;
+      try { sessionStorage.setItem('serpentina:recargas', String(n + 1)); } catch (e) {}
+      location.reload();
+    }
+    navigator.serviceWorker.register('/sw.js')
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function (reg) {
+        // Baixa tudo para o cache mostrando a %; depois recarrega, e o sw.js serve.
+        navigator.serviceWorker.addEventListener('message', function (e) {
+          var m = e.data;
+          if (!m || !m.serpentina) return;
+          if (m.tipo === 'progresso') mostrar(m.feito, m.total);
+          else if (m.tipo === 'pronto') recarregar();
+          else if (m.tipo === 'erro') carregar();
+        });
+        reg.active.postMessage({ tipo: 'preparar' });
+      })
+      .catch(function (err) {
+        console.error('serpentina: sw.js', err);
+        carregar();
+      });
+  }
+
+  botao.onclick = carregar;
+  if ('serviceWorker' in navigator) instalar();
+  else carregar();
+})();
+</script>
+</body>
+</html>
