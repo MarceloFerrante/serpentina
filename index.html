@@ -1,8 +1,8 @@
 <!doctype html>
 <!-- Serpentina: página carregadora servida no subdomínio (GitHub Pages).
-     Busca o HTML no App da Web (serpentina.gs, ?texto=1) e o escreve como a
-     própria página: sem quadro, sem Google Sites. Ao trocar a implantação do
-     Apps Script, atualize URL_EXEC abaixo. -->
+     Busca o HTML pela API do Drive (ou, na falta dela, no App da Web
+     serpentina.gs) e o escreve como a própria página: sem quadro, sem Google
+     Sites. Configuração no início do <script>. -->
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -41,14 +41,28 @@
 
 <script>
 (function () {
+  // Fonte principal: a API do Drive, servida pela rede do Google, rápida e sem
+  // Apps Script. Exige o arquivo como "Qualquer pessoa com o link: Leitor" e uma
+  // chave de API restrita à Drive API e aos referenciadores deste site. Com
+  // API_KEY vazia, pula direto para a reserva.
+  var DRIVE_ID = '1-9_AQbL3EPz8sbTP89MhYnlc3rsTDGtj';
+  var API_KEY = '';
+  // Reserva: o App da Web serpentina.gs (?texto=1), que acha o arquivo pelo nome.
   var URL_EXEC = 'https://script.google.com/macros/s/AKfycbxyLKFIC5usHen0-c3glTYn7-fQgyeiOfhhGQnftCIg_m7GtNTSarngH-ggXectcvspuA/exec';
+
   var TEXTO = 'CARREGANDO ORÁCULO...';
   var TEXTO_DEMORA = 'DESPERTANDO O ORÁCULO...';
-  // O Apps Script parado há um tempo pode levar mais de 30 s na primeira chamada,
-  // ou falhar; por isso a espera longa e as novas tentativas automáticas.
-  var TEMPO_LIMITE_MS = 90000;
-  var TENTATIVAS = 3;
   var ERRO = '<!--serpentina:erro-->';
+
+  // [url, tempo limite]. O Apps Script parado há um tempo pode levar mais de
+  // 30 s na primeira chamada, ou falhar; por isso a espera longa e as repetições.
+  var exec = URL_EXEC + (URL_EXEC.indexOf('?') < 0 ? '?' : '&') + 'texto=1';
+  var FONTES = [];
+  if (API_KEY) {
+    FONTES.push(['https://www.googleapis.com/drive/v3/files/' + DRIVE_ID +
+      '?alt=media&key=' + API_KEY, 30000]);
+  }
+  FONTES.push([exec, 90000], [exec, 90000], [exec, 90000]);
 
   var caixa = document.getElementById('serpentina');
   var msg = document.getElementById('serpentina-msg');
@@ -60,11 +74,11 @@
     botao.hidden = false;
   }
 
-  function tentar(n) {
+  function tentar(i) {
+    var url = FONTES[i][0];
     var ctrl = new AbortController();
-    var timer = setTimeout(function () { ctrl.abort(); }, TEMPO_LIMITE_MS);
+    var timer = setTimeout(function () { ctrl.abort(); }, FONTES[i][1]);
     var aviso = setTimeout(function () { msg.textContent = TEXTO_DEMORA; }, 8000);
-    var url = URL_EXEC + (URL_EXEC.indexOf('?') < 0 ? '?' : '&') + 'texto=1&t=' + Date.now();
     fetch(url, { signal: ctrl.signal, cache: 'no-store' })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -82,10 +96,10 @@
       .catch(function (err) {
         clearTimeout(timer);
         clearTimeout(aviso);
-        console.error('serpentina (tentativa ' + n + '):', err);
-        if (n < TENTATIVAS) {
+        console.error('serpentina (fonte ' + (i + 1) + '/' + FONTES.length + '):', err);
+        if (i + 1 < FONTES.length) {
           msg.textContent = TEXTO_DEMORA;
-          setTimeout(function () { tentar(n + 1); }, 2000);
+          setTimeout(function () { tentar(i + 1); }, i === 0 && API_KEY ? 0 : 2000);
         } else {
           falhou();
         }
@@ -96,7 +110,7 @@
     caixa.className = '';
     msg.textContent = TEXTO;
     botao.hidden = true;
-    tentar(1);
+    tentar(0);
   }
 
   botao.onclick = carregar;
