@@ -1,0 +1,95 @@
+<!-- Serpentina: cole tudo isto em "Inserir → Incorporar → Código" no Google Sites
+     e troque URL_EXEC pela URL /exec da implantação de serpentina.gs. -->
+<div id="serpentina">
+  <div class="anel"></div>
+  <p id="serpentina-msg">CARREGANDO ORÁCULO...</p>
+  <button id="serpentina-botao" hidden>TENTAR DE NOVO</button>
+</div>
+
+<style>
+  @keyframes serpentina-giro { 100% { transform: rotate(360deg); } }
+  html, body { margin: 0; padding: 0; background: #080806; }
+  #serpentina {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: #080806; color: #c4a76a; font-family: monospace;
+  }
+  #serpentina .anel {
+    width: 46px; height: 46px; border-radius: 50%;
+    border: 1.5px dashed rgba(196, 167, 106, 0.4); border-top: 2px solid #c4a76a;
+    animation: serpentina-giro 1.8s linear infinite;
+  }
+  #serpentina p { margin-top: 18px; font-size: 11px; letter-spacing: 3px; opacity: 0.85; text-align: center; }
+  #serpentina button {
+    margin-top: 12px; padding: 8px 16px; cursor: pointer;
+    background: none; color: inherit; font: inherit; font-size: 11px; letter-spacing: 2px;
+    border: 1px solid rgba(196, 167, 106, 0.6); border-radius: 2px;
+  }
+  #serpentina button[hidden] { display: none; }
+  #serpentina.falhou .anel { animation: none; border-style: solid; opacity: 0.4; }
+</style>
+
+<script>
+(function () {
+  var URL_EXEC = 'https://script.google.com/macros/s/AKfycbxyLKFIC5usHen0-c3glTYn7-fQgyeiOfhhGQnftCIg_m7GtNTSarngH-ggXectcvspuA/exec';
+  var TEXTO = 'CARREGANDO ORÁCULO...';
+  var TEXTO_DEMORA = 'DESPERTANDO O ORÁCULO...';
+  // O Apps Script parado há um tempo pode levar mais de 30 s na primeira chamada,
+  // ou falhar; por isso a espera longa e as novas tentativas automáticas.
+  var TEMPO_LIMITE_MS = 90000;
+  var TENTATIVAS = 3;
+  var ERRO = '<!--serpentina:erro-->';
+
+  var caixa = document.getElementById('serpentina');
+  var msg = document.getElementById('serpentina-msg');
+  var botao = document.getElementById('serpentina-botao');
+
+  function falhou() {
+    caixa.className = 'falhou';
+    msg.textContent = 'NÃO FOI POSSÍVEL CARREGAR.';
+    botao.hidden = false;
+  }
+
+  function tentar(n) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, TEMPO_LIMITE_MS);
+    var aviso = setTimeout(function () { msg.textContent = TEXTO_DEMORA; }, 8000);
+    var url = URL_EXEC + (URL_EXEC.indexOf('?') < 0 ? '?' : '&') + 'texto=1&t=' + Date.now();
+    fetch(url, { signal: ctrl.signal, cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(function (html) {
+        clearTimeout(timer);
+        clearTimeout(aviso);
+        if (html.indexOf(ERRO) === 0) throw new Error('erro no Apps Script');
+        // Substitui este documento (e a tela de carregamento) pelo site.
+        document.open();
+        document.write(html);
+        document.close();
+      })
+      .catch(function (err) {
+        clearTimeout(timer);
+        clearTimeout(aviso);
+        console.error('serpentina (tentativa ' + n + '):', err);
+        if (n < TENTATIVAS) {
+          msg.textContent = TEXTO_DEMORA;
+          setTimeout(function () { tentar(n + 1); }, 2000);
+        } else {
+          falhou();
+        }
+      });
+  }
+
+  function carregar() {
+    caixa.className = '';
+    msg.textContent = TEXTO;
+    botao.hidden = true;
+    tentar(1);
+  }
+
+  botao.onclick = carregar;
+  carregar();
+})();
+</script>
